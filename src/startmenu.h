@@ -22,6 +22,8 @@ signals:
     void wineAppRequested(const QString &exe);
     void wineExeFileRequested();
     void shutdownRequested();
+    void fullscreenRequested();
+    void borderlessRequested();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

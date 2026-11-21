@@ -8,18 +8,23 @@ pulled into the sandbox. Windows programs work too, through Wine.
 
 ## What it can do
 
-- 🎬 **A 5-second boot animation**: 2 seconds of streaming code output with
+- 🎬 **A 5-second boot animation**: 2 seconds of white-dominant code flooding
+  most of the window (with jerky, bursty rhythm like a real boot log) around
   the NVazen Linux logo, then a 3-second macOS-style progress bar, then the
   desktop fades in.
+- 🪟 **Fully self-drawn windows (compositor mode)**: app windows are
+  redirected off-screen with XComposite the instant they appear, and the
+  sandbox repaints their pixels itself into its own rounded, shadowed
+  Windows-11 frames — no app window is ever visible outside the sandbox.
 - 🪟 **Windows 11 look**: centred taskbar, rounded self-drawn window frames
-  with soft shadows and caption buttons — no app's original decoration is
-  ever shown.
+  with soft shadows and caption buttons.
 - 🖥️ **A toy desktop** styled after your KDE Plasma look: it reads your
   wallpaper, colors, font and icon theme automatically.
-- 🚀 **Start menu**: search box, app grid, a Windows (Wine) section and a
+- 🚀 **Start menu**: fixed centred above the taskbar — search box, app grid,
+  a Windows (Wine) section, Fullscreen / Borderless toggles and the
   "Shut Down Sandbox" button.
-- 🪟 **A mini window manager**: move windows by their title bar, minimize,
-  maximize and close them; every window gets a button in the taskbar.
+- ⛶ **Fullscreen** (F11) and **borderless** modes; in borderless mode drag
+  the empty desktop to move the window.
 - 🍷 **Wine inside the sandbox**: Notepad, Calculator, Regedit or any `.exe`
   you pick — the wine window lands inside the sandbox like any other app.
 - ⏻ Closing the sandbox shuts down every app that lives in it.

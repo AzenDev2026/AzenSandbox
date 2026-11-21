@@ -9,7 +9,9 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QScreen>
+#include <QShortcut>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -22,6 +24,7 @@
 #include "embedded.h"
 #include "proc.h"
 #include "taskbar.h"
+#include "startmenu.h"
 #include "theme.h"
 #include "x11.h"
 
@@ -60,6 +63,24 @@ SandboxWindow::SandboxWindow() {
     connect(taskbar_, &Taskbar::wineExeFileRequested, this, &SandboxWindow::openExeFile);
     connect(taskbar_, &Taskbar::shutdownRequested, this, &SandboxWindow::shutdownSandbox);
     connect(taskbar_, &Taskbar::taskClicked, this, &SandboxWindow::handleTaskClicked);
+    connect(taskbar_, &Taskbar::fullscreenRequested, this, &SandboxWindow::toggleFullscreen);
+    connect(taskbar_, &Taskbar::borderlessRequested, this, &SandboxWindow::toggleBorderless);
+
+    // F11 toggles fullscreen, Esc leaves it.
+    auto *fullscreenShortcut = new QShortcut(QKeySequence(Qt::Key_F11), this);
+    connect(fullscreenShortcut, &QShortcut::activated, this, &SandboxWindow::toggleFullscreen);
+    auto *escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(escapeShortcut, &QShortcut::activated, this, [this]() {
+        if (isFullScreen())
+            toggleFullscreen();
+    });
+
+    // Borderless mode: dragging empty desktop / taskbar moves the window.
+    desktop_->installEventFilter(this);
+    taskbar_->installEventFilter(this);
+
+    // Adopt newly mapped windows the moment they appear.
+    X11::watchRootSubstructure();
 
     pollTimer_ = new QTimer(this);
     pollTimer_->setInterval(POLL_MS);
@@ -179,10 +200,7 @@ void SandboxWindow::openExeFile() {
 void SandboxWindow::poll() {
     if (shuttingDown_)
         return;
-    // Try to adopt windows of every running process.
-    const QList<qint64> pids = runners_.keys();
-    for (qint64 pid : pids)
-        tryEmbed(pid);
+    tryEmbedAll();
 
     // Refresh titles (cheap) and prune dead frames.
     for (auto it = byXid_.begin(); it != byXid_.end();) {
@@ -201,6 +219,12 @@ void SandboxWindow::poll() {
         }
         ++it;
     }
+}
+
+void SandboxWindow::tryEmbedAll() {
+    const QList<qint64> pids = runners_.keys();
+    for (qint64 pid : pids)
+        tryEmbed(pid);
 }
 
 void SandboxWindow::tryEmbed(long pid) {
@@ -260,6 +284,9 @@ void SandboxWindow::embedWindow(xcb_window_t w, long pid) {
             [this](EmbeddedWindow *win) { taskbar_->refreshTask(win); });
     byXid_.insert(w, ew);
     windowPid_.insert(ew, pid);
+    const xcb_damage_damage_t damage = X11::createDamage(w);
+    if (damage != XCB_NONE)
+        damagesByXid_.insert(w, damage);
     ew->show();
     ew->attach(w);
     taskbar_->addTask(ew, pidIcons_.value(pid));
@@ -285,6 +312,7 @@ void SandboxWindow::activateWindow(EmbeddedWindow *w, bool focus) {
 
 void SandboxWindow::removeWindow(EmbeddedWindow *w) {
     byXid_.remove(w->xid());
+    damagesByXid_.remove(w->xid());
     windowPid_.remove(w);
     if (active_ == w)
         active_ = nullptr;
@@ -312,6 +340,29 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
         return false;
     auto *event = static_cast<xcb_generic_event_t *>(message);
     const uint8_t type = event->response_type & ~0x80;
+
+    // Freshly mapped windows: adopt (and redirect) immediately, so an app
+    // window is never visible outside the sandbox.
+    if (type == XCB_MAP_NOTIFY) {
+        auto *map = reinterpret_cast<xcb_map_notify_event_t *>(event);
+        if (map->window != static_cast<xcb_window_t>(winId()) && !byXid_.contains(map->window))
+            tryEmbedAll();
+        return false;
+    }
+
+    // Composited contents changed: repaint that window.
+    const uint8_t damageEvent = X11::damageNotifyEvent();
+    if (damageEvent && type == damageEvent + XCB_DAMAGE_NOTIFY) {
+        auto *dn = reinterpret_cast<xcb_damage_notify_event_t *>(event);
+        EmbeddedWindow *w = byXid_.value(dn->drawable, nullptr);
+        if (w) {
+            const xcb_damage_damage_t damage = damagesByXid_.value(dn->drawable, XCB_NONE);
+            if (damage != XCB_NONE)
+                X11::subtractDamage(damage);
+            w->refreshContents();
+        }
+        return false;
+    }
 
     switch (type) {
     case XCB_BUTTON_PRESS: {
@@ -373,6 +424,36 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
 
 // -- lifecycle ---------------------------------------------------------
 
+void SandboxWindow::toggleFullscreen() {
+    if (isFullScreen())
+        showNormal();
+    else
+        showFullScreen();
+}
+
+void SandboxWindow::toggleBorderless() {
+    borderless_ = !borderless_;
+    setWindowFlag(Qt::FramelessWindowHint, borderless_);
+    show();
+    showToast(borderless_ ? QStringLiteral("Borderless — drag the desktop to move; toggle again to restore")
+                          : QStringLiteral("Window border restored"));
+}
+
+bool SandboxWindow::eventFilter(QObject *watched, QEvent *event) {
+    // In borderless mode the host decorations are gone: dragging the empty
+    // desktop or the taskbar background moves the sandbox window.
+    if (borderless_ && !isFullScreen() && event->type() == QEvent::MouseButtonPress &&
+        (watched == desktop_ || watched == taskbar_)) {
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (mouse->button() == Qt::LeftButton && windowHandle()) {
+            if (windowHandle()->startSystemMove()) {
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
 void SandboxWindow::shutdownSandbox() {
     close();
 }
@@ -410,12 +491,17 @@ void SandboxWindow::runTestMode() {
     if (!konsole.isEmpty())
         spawn(konsole, {}, QStringLiteral("utilities-terminal"), QStringLiteral("Konsole"));
 
+    if (qEnvironmentVariableIsSet("AZS_TEST_MENU"))
+        QTimer::singleShot(3200, taskbar_, &Taskbar::openStartMenu);
+
     QTimer::singleShot(5000, this, [this]() {
         QJsonArray wins;
         for (auto it = byXid_.constBegin(); it != byXid_.constEnd(); ++it) {
             QJsonObject o;
             o.insert("title", it.value()->title());
             o.insert("minimized", it.value()->isMinimized());
+            o.insert("redirected", it.value()->isRedirected());
+            o.insert("painted", it.value()->hasContents());
             o.insert("x", it.value()->x());
             o.insert("y", it.value()->y());
             o.insert("w", it.value()->width());
@@ -425,6 +511,18 @@ void SandboxWindow::runTestMode() {
         QJsonObject report;
         report.insert("embedded", static_cast<int>(byXid_.size()));
         report.insert("windows", wins);
+        report.insert("win_x", x());
+        report.insert("win_y", y());
+        report.insert("win_w", width());
+        report.insert("win_h", height());
+        if (StartMenu *menu = taskbar_->menuHandle()) {
+            if (menu->isVisible()) {
+                report.insert("menu_x", menu->x());
+                report.insert("menu_y", menu->y());
+                report.insert("menu_w", menu->width());
+                report.insert("menu_h", menu->height());
+            }
+        }
         fprintf(stdout, "AZS_TEST_REPORT %s\n",
                 QJsonDocument(report).toJson(QJsonDocument::Compact).constData());
         fflush(stdout);

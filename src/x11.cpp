@@ -188,38 +188,6 @@ void X11::mapWindow(xcb_window_t w) {
         xcb_map_window(c, w);
 }
 
-void X11::roundBottomCorners(xcb_window_t w, int width, int height, int radius) {
-    xcb_connection_t *c = connection();
-    if (!c || !xcb_get_extension_data(c, &xcb_shape_id) ||
-        !xcb_get_extension_data(c, &xcb_shape_id)->present) {
-        return;
-    }
-    if (width < 2 || height < 2)
-        return;
-    radius = qBound(0, radius, qMin(width, height) / 2);
-    QVector<xcb_rectangle_t> rects;
-    rects.reserve(height + radius);
-    for (int y = 0; y < height; ++y) {
-        int inset = 0;
-        if (y >= height - radius && radius > 0) {
-            const int dy = y - (height - radius);
-            // quarter-circle inset: r - sqrt(r^2 - dy^2)
-            const double val = radius * radius - double(dy) * dy;
-            inset = radius - int(std::sqrt(qMax(0.0, val)));
-        }
-        xcb_rectangle_t r;
-        r.x = static_cast<int16_t>(inset);
-        r.y = static_cast<int16_t>(y);
-        r.width = static_cast<uint16_t>(qMax(1, width - 2 * inset));
-        r.height = 1;
-        rects.append(r);
-    }
-    xcb_shape_rectangles(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
-                         XCB_CLIP_ORDERING_UNSORTED, w, 0, 0,
-                         static_cast<uint32_t>(rects.size()), rects.constData());
-    // The window has an empty shape mask by default; also enable it.
-    xcb_shape_mask(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING, w, 0, 0, XCB_PIXMAP_NONE);
-}
 
 void X11::unmapWindow(xcb_window_t w) {
     if (xcb_connection_t *c = connection())
@@ -292,4 +260,103 @@ void X11::requestClose(xcb_window_t w) {
 void X11::killClientConnection(xcb_window_t w) {
     if (xcb_connection_t *c = connection())
         xcb_kill_client(c, w);
+}
+
+// ------------------------------------------------------------ compositing --
+
+bool X11::compositeAvailable() {
+    xcb_connection_t *c = connection();
+    if (!c)
+        return false;
+    const xcb_query_extension_reply_t *ext = xcb_get_extension_data(c, &xcb_composite_id);
+    return ext && ext->present;
+}
+
+bool X11::redirectWindow(xcb_window_t w) {
+    xcb_connection_t *c = connection();
+    if (!c || !compositeAvailable())
+        return false;
+    xcb_void_cookie_t cookie =
+        xcb_composite_redirect_window_checked(c, w, XCB_COMPOSITE_REDIRECT_AUTOMATIC);
+    return xcb_request_check(c, cookie) == nullptr;
+}
+
+QImage X11::windowContents(xcb_window_t w) {
+    xcb_connection_t *c = connection();
+    if (!c || !compositeAvailable())
+        return QImage();
+
+    xcb_get_geometry_cookie_t geoCookie = xcb_get_geometry(c, w);
+    xcb_get_geometry_reply_t *geo = xcb_get_geometry_reply(c, geoCookie, nullptr);
+    if (!geo)
+        return QImage();
+    const int width = geo->width;
+    const int height = geo->height;
+    const int depth = geo->depth;
+    free(geo);
+    if (width <= 0 || height <= 0)
+        return QImage();
+
+    // Note: this legacy extension call takes a client-generated pixmap id.
+    const xcb_pixmap_t pixmap = xcb_generate_id(c);
+    xcb_void_cookie_t nameCookie = xcb_composite_name_window_pixmap(c, w, pixmap);
+    xcb_generic_error_t *err = xcb_request_check(c, nameCookie);
+    if (err) {
+        free(err);
+        return QImage();
+    }
+
+    xcb_get_image_cookie_t imgCookie =
+        xcb_get_image(c, XCB_IMAGE_FORMAT_Z_PIXMAP, pixmap, 0, 0,
+                      static_cast<uint16_t>(width), static_cast<uint16_t>(height), ~0u);
+    xcb_get_image_reply_t *img = xcb_get_image_reply(c, imgCookie, nullptr);
+    xcb_free_pixmap(c, pixmap);
+    if (!img) {
+        return QImage();
+    }
+
+    uint8_t *data = xcb_get_image_data(img);
+    // 32 bits per pixel for both 24- and 32-bit depth windows; little-endian
+    // bytes arrive as B,G,R(,A), which matches QImage's RGB32/ARGB32.
+    const QImage::Format fmt = (depth == 32) ? QImage::Format_ARGB32 : QImage::Format_RGB32;
+    QImage image(data, width, height, width * 4, fmt);
+    QImage copy = image.copy(); // own the pixels before the reply is freed
+    free(img);
+    return copy;
+}
+
+xcb_damage_damage_t X11::createDamage(xcb_window_t w) {
+    xcb_connection_t *c = connection();
+    if (!c)
+        return XCB_NONE;
+    const xcb_query_extension_reply_t *ext = xcb_get_extension_data(c, &xcb_damage_id);
+    if (!ext || !ext->present)
+        return XCB_NONE;
+    xcb_damage_damage_t damage = xcb_generate_id(c);
+    xcb_damage_create(c, damage, w, XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
+    return damage;
+}
+
+uint8_t X11::damageNotifyEvent() {
+    xcb_connection_t *c = connection();
+    if (!c)
+        return 0;
+    const xcb_query_extension_reply_t *ext = xcb_get_extension_data(c, &xcb_damage_id);
+    return ext && ext->present ? ext->first_event : 0;
+}
+
+void X11::subtractDamage(xcb_damage_damage_t damage) {
+    xcb_connection_t *c = connection();
+    if (!c || damage == XCB_NONE)
+        return;
+    xcb_damage_subtract(c, damage, XCB_NONE, XCB_NONE);
+}
+
+void X11::watchRootSubstructure() {
+    xcb_connection_t *c = connection();
+    const xcb_window_t root = rootWindow();
+    if (!c || !root)
+        return;
+    const uint32_t mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+    xcb_change_window_attributes(c, root, XCB_CW_EVENT_MASK, &mask);
 }

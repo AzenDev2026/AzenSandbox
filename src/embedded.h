@@ -39,6 +39,8 @@ public:
     void attach(xcb_window_t xid);
     xcb_window_t xid() const { return xid_; }
     QString title() const { return title_; }
+    bool isRedirected() const { return redirected_; }
+    bool hasContents() const { return !contents_.isNull(); }
 
     void setActive(bool on);
     bool isActive() const { return active_; }
@@ -49,6 +51,9 @@ public:
     bool isMinimized() const { return minimized_; }
     void toggleMaximize();
     bool isMaximized() const { return maximized_; }
+
+    //: Refetch the app's pixels and repaint (called on damage events / timer).
+    void refreshContents();
 
     static constexpr int TITLEBAR_H = 36;
     static constexpr int SHADOW = 16;   // margin reserved for the drop shadow
@@ -80,6 +85,9 @@ private:
     bool active_ = false;
     bool minimized_ = false;
     bool maximized_ = false;
+    bool redirected_ = false;
+    QPixmap contents_;
+    QTimer *refreshTimer_ = nullptr;
     QRect restoreGeom_;
     bool dragging_ = false;
     QPoint dragOffset_;

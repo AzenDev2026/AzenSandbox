@@ -84,7 +84,7 @@ Taskbar::Taskbar(QWidget *parent) : QWidget(parent) {
     startBtn_->setFixedSize(40, 40);
     startBtn_->setToolTip(QStringLiteral("Start"));
     startBtn_->setCursor(Qt::PointingHandCursor);
-    connect(startBtn_, &QToolButton::clicked, this, &Taskbar::showStartMenu);
+    connect(startBtn_, &QToolButton::clicked, this, &Taskbar::openStartMenu);
     bar->addWidget(startBtn_);
 
     auto pinned = [this](const QIcon &icon, const QString &tooltip, const QString &id) {
@@ -137,13 +137,15 @@ QToolButton *Taskbar::makeIconButton(const QIcon &icon, const QString &tooltip) 
     return b;
 }
 
-void Taskbar::showStartMenu() {
+void Taskbar::openStartMenu() {
     if (!menu_) {
         menu_ = new StartMenu(this);
         connect(menu_, &StartMenu::appLaunchRequested, this, &Taskbar::appLaunchRequested);
         connect(menu_, &StartMenu::wineAppRequested, this, &Taskbar::wineAppRequested);
         connect(menu_, &StartMenu::wineExeFileRequested, this, &Taskbar::wineExeFileRequested);
         connect(menu_, &StartMenu::shutdownRequested, this, &Taskbar::shutdownRequested);
+        connect(menu_, &StartMenu::fullscreenRequested, this, &Taskbar::fullscreenRequested);
+        connect(menu_, &StartMenu::borderlessRequested, this, &Taskbar::borderlessRequested);
 
         QString wine = QStandardPaths::findExecutable(QStringLiteral("wine"));
         if (wine.isEmpty())
@@ -160,9 +162,18 @@ void Taskbar::showStartMenu() {
             menu_->setWineAvailable(false, QString());
         }
     }
-    const QPoint buttonBottom = startBtn_->mapToGlobal(QPoint(startBtn_->width() / 2, startBtn_->height()));
-    const QPoint pos(buttonBottom.x() - menu_->width() / 2, buttonBottom.y() - menu_->sizeHint().height() - 10);
-    menu_->popupAt(pos);
+    // Fixed position: centred horizontally, sitting just above the taskbar.
+    QWidget *root = window();
+    if (!root)
+        root = this;
+    const QPoint rootCenter =
+        root->mapToGlobal(QPoint(root->width() / 2, 0));
+    const int taskbarY = mapToGlobal(QPoint(0, 0)).y();
+    const int menuY = taskbarY - menu_->height() - 10;
+    if (qEnvironmentVariableIsSet("AZS_DEBUG_MENU"))
+        fprintf(stderr, "MENU_DEBUG rootCenter=%d taskbarY=%d menuY=%d menu_h=%d\n",
+                rootCenter.x(), taskbarY, menuY, menu_->height());
+    menu_->popupAt(QPoint(rootCenter.x() - menu_->width() / 2, menuY));
 }
 
 void Taskbar::addTask(EmbeddedWindow *w, const QIcon &icon) {

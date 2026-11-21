@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QTimer>
 #include <xcb/xcb.h>
+#include <xcb/damage.h>
 
 class DesktopWidget;
 class EmbeddedWindow;
@@ -28,6 +29,7 @@ public:
 protected:
     void closeEvent(QCloseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 public slots:
     void launchById(const QString &desktopId);
@@ -35,9 +37,12 @@ public slots:
     void openExeFile();
     void shutdownSandbox();
     void showToast(const QString &text);
+    void toggleFullscreen();
+    void toggleBorderless();
 
 private:
     void poll();
+    void tryEmbedAll();
     void spawn(const QString &program, const QStringList &args, const QString &icon,
                const QString &name);
     void tryEmbed(long pid);
@@ -59,9 +64,11 @@ private:
     QHash<qint64, bool> pidHasWindow_;
     QSet<xcb_window_t> seenTopLevels_;
     QHash<xcb_window_t, EmbeddedWindow *> byXid_;
+    QHash<xcb_window_t, xcb_damage_damage_t> damagesByXid_;
     QHash<EmbeddedWindow *, qint64> windowPid_;
     EmbeddedWindow *active_ = nullptr;
     int cascade_ = 0;
     bool testMode_ = false;
     bool shuttingDown_ = false;
+    bool borderless_ = false;
 };

@@ -30,6 +30,6 @@ if(Qt6Gui_VERSION)
     target_include_directories(azen-sandbox PRIVATE
         "/usr/include/qt6/QtGui/${Qt6Gui_VERSION}")
 endif()
-target_link_libraries(azen-sandbox PRIVATE Qt6::Widgets X11::X11 xcb xcb-shape)
+target_link_libraries(azen-sandbox PRIVATE Qt6::Widgets X11::X11 xcb xcb-shape xcb-composite xcb-damage)
 
 install(TARGETS azen-sandbox RUNTIME DESTINATION bin)

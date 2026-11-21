@@ -2,10 +2,13 @@
 // events we select on foreign windows arrive through the native event filter.
 #pragma once
 
+#include <QImage>
 #include <QString>
 #include <QVector>
 
 #include <xcb/xcb.h>
+#include <xcb/composite.h>
+#include <xcb/damage.h>
 #include <xcb/shape.h>
 
 class X11 {
@@ -24,10 +27,6 @@ public:
 
     static void reparent(xcb_window_t child, xcb_window_t parent);
     static void moveResize(xcb_window_t w, int x, int y, int width, int height);
-    //: Round the BOTTOM corners of the window with the XShape extension
-    //   (no-op when the extension is missing), so embedded apps match the
-    //   sandbox's rounded frame.
-    static void roundBottomCorners(xcb_window_t w, int width, int height, int radius);
     static void mapWindow(xcb_window_t w);
     static void unmapWindow(xcb_window_t w);
     static void raiseWindow(xcb_window_t w);
@@ -35,6 +34,20 @@ public:
     static void selectEmbedEvents(xcb_window_t w);
     static void requestClose(xcb_window_t w); // WM_DELETE_WINDOW ClientMessage
     static void killClientConnection(xcb_window_t w);
+
+    // ---- compositing (the sandbox draws app windows itself) ----
+    static bool compositeAvailable();
+    //: Redirect the window off-screen so its pixels stop showing anywhere;
+    //   the sandbox then repaints them itself.
+    static bool redirectWindow(xcb_window_t w);
+    //: Grab the redirected window's current contents as an image.
+    static QImage windowContents(xcb_window_t w);
+    static xcb_damage_damage_t createDamage(xcb_window_t w);
+    static void subtractDamage(xcb_damage_damage_t damage);
+    static uint8_t damageNotifyEvent();
+    //: Subscribe to map events on the root so freshly created windows can be
+    //   adopted (and redirected) the moment they appear.
+    static void watchRootSubstructure();
 
 private:
     static xcb_atom_t atom(const char *name);

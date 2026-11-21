@@ -20,7 +20,7 @@ const QStringList LOG_POOL = {
     QStringLiteral("nvazen kernel: USB: 4 devices found"),
     QStringLiteral("systemd[1]: Reached target Toy Desktop."),
     QStringLiteral("azen-sandbox: adopting X display :1"),
-    QStringLiteral("azen-sandbox: xcb shape extension present"),
+    QStringLiteral("azen-sandbox: compositing: redirect enabled"),
     QStringLiteral("azen-sandbox: compiling whale emoji … done"),
     QStringLiteral("wine[1]: initialising Windows subsystem…"),
     QStringLiteral("wine[1]: C:\\windows ready"),
@@ -60,7 +60,7 @@ BootSplash::BootSplash(QWidget *parent) : QWidget(parent) {
 
 QString BootSplash::randomHexDump() {
     QString hex;
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 10; ++i)
         hex += QStringLiteral("%1 ").arg(QRandomGenerator::global()->bounded(0x10000), 4, 16,
                                          QLatin1Char('0'));
     return QStringLiteral("  mem: ") + hex.trimmed();
@@ -69,13 +69,13 @@ QString BootSplash::randomHexDump() {
 void BootSplash::addLogLines(int count) {
     for (int i = 0; i < count; ++i) {
         QString line;
-        if (QRandomGenerator::global()->bounded(8) == 0)
+        if (QRandomGenerator::global()->bounded(9) == 0)
             line = randomHexDump();
         else
             line = logPool_.at(QRandomGenerator::global()->bounded(logPool_.size()));
         logLines_.append(line);
     }
-    while (logLines_.size() > 16)
+    while (logLines_.size() > 40)
         logLines_.removeFirst();
 }
 
@@ -83,10 +83,20 @@ void BootSplash::tick() {
     const qint64 t = clock_.elapsed();
 
     if (t < PHASE1_MS) {
-        // Crazy code output: 1-3 lines per 30 ms tick.
-        addLogLines(1 + QRandomGenerator::global()->bounded(3));
+        // Jerky, bursty output — like a real boot log, not a smooth animation.
+        const int r = QRandomGenerator::global()->bounded(100);
+        if (r < 45)
+            addLogLines(1 + QRandomGenerator::global()->bounded(2));
+        else if (r < 52)
+            addLogLines(4 + QRandomGenerator::global()->bounded(6)); // sudden burst
+        // otherwise: stall
     } else if (t < PHASE1_MS + PHASE2_MS) {
-        progress_ = double(t - PHASE1_MS) / PHASE2_MS;
+        // Stuttery progress: random steps with stalls, like a real loader.
+        const int r = QRandomGenerator::global()->bounded(100);
+        if (r < 55)
+            progress_ += 0.008 + QRandomGenerator::global()->bounded(24) / 1000.0;
+        if (t >= PHASE1_MS + PHASE2_MS - 80)
+            progress_ = 1.0;
     } else if (!finishing_) {
         finishing_ = true;
     } else {
@@ -104,18 +114,50 @@ void BootSplash::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event);
     QPainter p(this);
     p.setOpacity(fade_);
-    p.fillRect(rect(), QColor(9, 9, 12));
+    p.fillRect(rect(), QColor(7, 7, 10));
 
     const qint64 t = clock_.elapsed();
 
-    // ---- logo, centre stage ----
-    const int logoSize = int(150 + 60 * qMin(1.0, t / 600.0)); // scale in
-    QRect logoRect((width() - logoSize) / 2, int(height() * 0.30) - logoSize / 2,
+    // ---- the code output floods most of the window ----
+    const double logAlpha = finishing_ ? fade_ : (t < PHASE1_MS ? 1.0 : 1.0 - (t - PHASE1_MS) / 1300.0);
+    if (logAlpha > 0.0 && !logLines_.isEmpty()) {
+        p.setOpacity(fade_ * qMax(0.0, logAlpha));
+        QFont mono(QStringLiteral("Monospace"), 11);
+        mono.setStyleHint(QFont::Monospace);
+        p.setFont(mono);
+        const int lineH = 18;
+        const int maxLines = qMax(4, (height() - 60) / lineH);
+        QStringList visible = logLines_;
+        while (visible.size() > maxLines)
+            visible.removeFirst();
+        const int startY = 24;
+        for (int i = 0; i < visible.size(); ++i) {
+            const int hash = qHash(visible.at(i)) % 10;
+            QColor color(232, 232, 232); // mostly white
+            if (hash == 8)
+                color = QColor(88, 200, 88);  // occasional green
+            else if (hash == 9)
+                color = QColor(224, 85, 85);  // occasional red
+            color.setAlpha(215);
+            p.setPen(color);
+            const QString prefix = QStringLiteral("[ %1.%2 ] ").arg(
+                (t / 1000) % 60, 2, 10, QLatin1Char('0')).arg((t / 10) % 100, 2, 10, QLatin1Char('0'));
+            p.drawText(QRect(26, startY + i * lineH, width() - 52, lineH),
+                       Qt::AlignLeft, prefix + visible.at(i));
+        }
+    }
+
+    // ---- logo, centre stage, on a soft dark plate for readability ----
+    const int logoSize = int(150 + 60 * qMin(1.0, t / 600.0));
+    QRect logoRect((width() - logoSize) / 2, int(height() * 0.36) - logoSize / 2,
                    logoSize, logoSize);
     double logoAlpha = qMin(1.0, t / 500.0);
     if (finishing_)
         logoAlpha = fade_;
     p.setOpacity(fade_ * logoAlpha);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(7, 7, 10, 165));
+    p.drawRoundedRect(logoRect.adjusted(-34, -26, 34, 26), 24, 24);
     if (!logo_.isNull()) {
         p.drawPixmap(logoRect, logo_.scaled(logoRect.size(), Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));
@@ -130,23 +172,21 @@ void BootSplash::paintEvent(QPaintEvent *event) {
 
     // ---- progress bar (phase 2) ----
     if (t >= PHASE1_MS) {
-        const int barW = 280, barH = 6;
+        const int barW = 300, barH = 6;
         const int barX = (width() - barW) / 2;
-        const int barY = int(height() * 0.30) + logoSize / 2 + 46;
+        const int barY = int(height() * 0.36) + logoSize / 2 + 52;
 
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(255, 255, 255, 36));
+        p.setBrush(QColor(255, 255, 255, 38));
         p.drawRoundedRect(barX, barY, barW, barH, 3, 3);
 
-        const double eased = 1.0 - (1.0 - progress_) * (1.0 - progress_); // ease-out
-        const int fillW = int(barW * qBound(0.0, eased, 1.0));
+        const int fillW = int(barW * qBound(0.0, progress_, 1.0));
         if (fillW > 0) {
             QLinearGradient g(barX, 0, barX + barW, 0);
             g.setColorAt(0, gTheme.accentHover);
             g.setColorAt(1, gTheme.accent);
             p.setBrush(g);
             p.drawRoundedRect(barX, barY, fillW, barH, 3, 3);
-            // shine
             p.setBrush(QColor(255, 255, 255, 110));
             p.drawRoundedRect(barX + 2, barY + 1, fillW - 4, 2, 1, 1);
         }
@@ -155,34 +195,5 @@ void BootSplash::paintEvent(QPaintEvent *event) {
         p.setFont(gTheme.font(-2));
         p.drawText(QRect(barX, barY + 16, barW, 20), Qt::AlignCenter,
                    QStringLiteral("Starting NVazen…"));
-    }
-
-    // ---- streaming code output (phase 1, fading out in phase 2) ----
-    const double logAlpha = finishing_ ? fade_ : (t < PHASE1_MS ? 1.0 : 1.0 - (t - PHASE1_MS) / 700.0);
-    if (logAlpha > 0.0 && !logLines_.isEmpty()) {
-        p.setOpacity(fade_ * qMax(0.0, logAlpha));
-        QFont mono = gTheme.font(-2);
-        mono.setFamily(QStringLiteral("Monospace"));
-        mono.setStyleHint(QFont::Monospace);
-        p.setFont(mono);
-        const int lineH = 17;
-        const int startY = height() - 16 - lineH * logLines_.size();
-        for (int i = 0; i < logLines_.size(); ++i) {
-            const int y = startY + i * lineH;
-            const int hash = qHash(logLines_.at(i)) % 5;
-            QColor color;
-            switch (hash) {
-            case 0: color = QColor(126, 200, 126); break;  // green
-            case 1: color = QColor(90, 200, 224); break;  // cyan
-            case 2: color = QColor(220, 220, 220); break; // white
-            case 3: color = QColor(200, 180, 120); break; // amber
-            default: color = QColor(140, 140, 150); break; // dim
-            }
-            color.setAlpha(210);
-            p.setPen(color);
-            const QString prefix = QStringLiteral("[ %1 ] ").arg(
-                (t / 100) % 60, 2, 10, QLatin1Char('0'));
-            p.drawText(24, y, width() - 48, lineH, Qt::AlignLeft, prefix + logLines_.at(i));
-        }
     }
 }

@@ -13,6 +13,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <functional>
+
 #include "apps.h"
 #include "theme.h"
 
@@ -55,7 +57,7 @@ StartMenu::StartMenu(QWidget *parent) : QWidget(parent) {
     scroll->setWidget(scrollContent_);
     outer->addWidget(scroll, 1);
 
-    // Wine row + shutdown.
+    // Wine row + window mode + shutdown.
     auto *bottom = new QHBoxLayout();
     bottom->setSpacing(8);
     wineLabel_ = new QLabel(this);
@@ -63,6 +65,29 @@ StartMenu::StartMenu(QWidget *parent) : QWidget(parent) {
                                   .arg(gTheme.textDim.name()));
     bottom->addWidget(wineLabel_);
     bottom->addStretch(1);
+
+    auto makeSmallButton = [this](const QString &text, const QString &tip,
+                                  std::function<void()> action) {
+        auto *b = new QPushButton(text, this);
+        b->setToolTip(tip);
+        b->setStyleSheet(QStringLiteral(
+            "QPushButton { background: rgba(255,255,255,0.07); color: white; border: 1px solid %1;"
+            "  border-radius: 6px; padding: 8px 12px; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.14); }")
+            .arg(gTheme.border.name()));
+        connect(b, &QPushButton::clicked, this, [this, action]() {
+            action();
+            hide();
+        });
+        return b;
+    };
+    bottom->addWidget(makeSmallButton(QStringLiteral("⛶ Fullscreen"),
+                                      QStringLiteral("Fullscreen (F11)"),
+                                      [this]() { emit fullscreenRequested(); }));
+    bottom->addWidget(makeSmallButton(QStringLiteral("⊞ Borderless"),
+                                      QStringLiteral("Hide the sandbox window border"),
+                                      [this]() { emit borderlessRequested(); }));
+
     auto *shutdown = new QPushButton(QStringLiteral("⏻  Shut Down Sandbox"), this);
     shutdown->setStyleSheet(QStringLiteral(
         "QPushButton { background: rgba(255,255,255,0.07); color: white; border: 1px solid %1;"

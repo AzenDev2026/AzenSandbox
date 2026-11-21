@@ -36,6 +36,8 @@ public:
     void removeTask(EmbeddedWindow *w);
     void refreshTask(EmbeddedWindow *w);
     void setActiveTask(EmbeddedWindow *w);
+    void openStartMenu(); // used by the test mode too
+    StartMenu *menuHandle() const { return menu_; }
 
 signals:
     void appLaunchRequested(const QString &desktopId);
@@ -43,10 +45,11 @@ signals:
     void wineExeFileRequested();
     void shutdownRequested();
     void taskClicked(EmbeddedWindow *w);
+    void fullscreenRequested();
+    void borderlessRequested();
 
 private:
     void updateClock();
-    void showStartMenu();
     QToolButton *makeIconButton(const QIcon &icon, const QString &tooltip);
 
     StartMenu *menu_ = nullptr;
