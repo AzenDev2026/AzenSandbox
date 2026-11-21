@@ -33,15 +33,24 @@ Skip the boot animation with `AZS_NO_BOOT=1 azen-sandbox`.
 
 ## How it works
 
-Azen Sandbox is a Qt6 Widgets app that speaks the X11 protocol. When you
-launch an app from the start menu it is spawned inside its own process group
-on the X display, and the sandbox then finds the app's window
-(`_NET_WM_PID`, with a friendly adoption fallback for old apps that set no
-pid) and **reparents it into the sandbox window** with `xcb`. Input still
-goes to the app normally; the sandbox just draws the frame and the taskbar.
+Azen Sandbox is a Qt6 Widgets app that runs inside its **own nested X
+server** ([Xephyr](https://www.freedesktop.org/wiki/Software/Xephyr/)). On
+startup it launches `Xephyr :101` as the sandbox's private display, then
+re-runs itself fullscreen inside it. Every app you launch from the start
+menu is spawned inside that display, so its windows exist **only inside the
+sandbox** — they can never appear on your real desktop, and closing the
+sandbox tears the whole little world down with it.
 
-On a Wayland session the sandbox runs on XWayland automatically, so it works
-on both session types.
+Inside the nested display the sandbox is the window manager: it finds each
+app's window (`_NET_WM_PID`, with a friendly adoption fallback for old apps
+that set no pid) and reparents it into its own rounded, shadowed Windows-11
+frames. Reparenting is perfectly legal on a real X server — this is why the
+nested display exists: doing the same on XWayland can wedge clients in an
+unkillable state.
+
+On an X11 session, or when Xephyr is missing, the sandbox falls back to
+running on the real display (with a warning). Install Xephyr with
+`sudo pacman -S xorg-server-xephyr` for the full sandbox experience.
 
 ## Build & run
 
