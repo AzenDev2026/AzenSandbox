@@ -6,6 +6,8 @@
 #include <QStringList>
 #include <QtGui/qpa/qplatformnativeinterface.h>
 
+#include <cmath>
+
 namespace {
 
 xcb_atom_t intern(const char *name) {
@@ -184,6 +186,39 @@ void X11::moveResize(xcb_window_t w, int x, int y, int width, int height) {
 void X11::mapWindow(xcb_window_t w) {
     if (xcb_connection_t *c = connection())
         xcb_map_window(c, w);
+}
+
+void X11::roundBottomCorners(xcb_window_t w, int width, int height, int radius) {
+    xcb_connection_t *c = connection();
+    if (!c || !xcb_get_extension_data(c, &xcb_shape_id) ||
+        !xcb_get_extension_data(c, &xcb_shape_id)->present) {
+        return;
+    }
+    if (width < 2 || height < 2)
+        return;
+    radius = qBound(0, radius, qMin(width, height) / 2);
+    QVector<xcb_rectangle_t> rects;
+    rects.reserve(height + radius);
+    for (int y = 0; y < height; ++y) {
+        int inset = 0;
+        if (y >= height - radius && radius > 0) {
+            const int dy = y - (height - radius);
+            // quarter-circle inset: r - sqrt(r^2 - dy^2)
+            const double val = radius * radius - double(dy) * dy;
+            inset = radius - int(std::sqrt(qMax(0.0, val)));
+        }
+        xcb_rectangle_t r;
+        r.x = static_cast<int16_t>(inset);
+        r.y = static_cast<int16_t>(y);
+        r.width = static_cast<uint16_t>(qMax(1, width - 2 * inset));
+        r.height = 1;
+        rects.append(r);
+    }
+    xcb_shape_rectangles(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
+                         XCB_CLIP_ORDERING_UNSORTED, w, 0, 0,
+                         static_cast<uint32_t>(rects.size()), rects.constData());
+    // The window has an empty shape mask by default; also enable it.
+    xcb_shape_mask(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING, w, 0, 0, XCB_PIXMAP_NONE);
 }
 
 void X11::unmapWindow(xcb_window_t w) {

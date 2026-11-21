@@ -1,12 +1,34 @@
-// A window frame drawn by the sandbox with a foreign X window reparented
-// into the content area: move, minimize, maximize and close, toy-style.
+// A fully self-drawn Windows-11-style window frame. The real app window is
+// reparented into the content area (with XShape-rounded bottom corners), so
+// no original decoration of any app is ever shown.
 #pragma once
 
 #include <QWidget>
 #include <xcb/xcb.h>
 
 class QLabel;
-class QPushButton;
+
+class CaptionButton : public QWidget {
+    Q_OBJECT
+public:
+    enum Kind { Minimize, Maximize, Close };
+    explicit CaptionButton(Kind kind, QWidget *parent = nullptr);
+
+signals:
+    void clicked();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void enterEvent(QEnterEvent *event) override;
+    void leaveEvent(QEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+
+private:
+    Kind kind_;
+    bool hover_ = false;
+    bool pressed_ = false;
+};
 
 class EmbeddedWindow : public QWidget {
     Q_OBJECT
@@ -28,7 +50,9 @@ public:
     void toggleMaximize();
     bool isMaximized() const { return maximized_; }
 
-    static constexpr int TITLEBAR_H = 32;
+    static constexpr int TITLEBAR_H = 36;
+    static constexpr int SHADOW = 16;   // margin reserved for the drop shadow
+    static constexpr int RADIUS = 8;
 
 signals:
     void closeRequested(EmbeddedWindow *w);
@@ -36,21 +60,21 @@ signals:
     void activated(EmbeddedWindow *w);
 
 protected:
+    void paintEvent(QPaintEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
-    void moveEvent(QMoveEvent *event) override;
 
 private:
     void syncChildGeometry();
     void applyStyle();
     void dragFromTitlebar(QMouseEvent *event);
-
+    QWidget *frame_ = nullptr;   // rounded surface inside the shadow margin
     QWidget *titlebar_ = nullptr;
     QWidget *content_ = nullptr;
     QLabel *iconLabel_ = nullptr;
     QLabel *titleLabel_ = nullptr;
-    QPushButton *minBtn_ = nullptr;
-    QPushButton *maxBtn_ = nullptr;
-    QPushButton *closeBtn_ = nullptr;
+    CaptionButton *minBtn_ = nullptr;
+    CaptionButton *maxBtn_ = nullptr;
+    CaptionButton *closeBtn_ = nullptr;
     xcb_window_t xid_ = 0;
     QString title_;
     bool active_ = false;

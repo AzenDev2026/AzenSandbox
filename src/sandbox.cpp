@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "apps.h"
+#include "boot.h"
 #include "desktop.h"
 #include "embedded.h"
 #include "proc.h"
@@ -68,10 +69,39 @@ SandboxWindow::SandboxWindow() {
     if (testMode_)
         QTimer::singleShot(400, this, &SandboxWindow::runTestMode);
 
-    showToast(QStringLiteral("🐳 Welcome to Azen Sandbox — open the start menu and launch something!"));
+    // 5-second boot animation: 2 s of code output + logo, 3 s progress bar.
+    if (!testMode_ && !qEnvironmentVariableIsSet("AZS_NO_BOOT")) {
+        splash_ = new BootSplash(central);
+        splash_->setGeometry(central->rect());
+        splash_->show();
+        splash_->raise();
+        connect(splash_, &BootSplash::finished, splash_, &QObject::deleteLater);
+        connect(splash_, &BootSplash::finished, this, [this]() {
+            showToast(QStringLiteral("🐳 Welcome to Azen Sandbox — open the start menu!"));
+        });
+        connect(splash_, &QObject::destroyed, this, [this]() { splash_ = nullptr; });
+    } else {
+        showToast(QStringLiteral("🐳 Welcome to Azen Sandbox — open the start menu and launch something!"));
+    }
 }
 
-SandboxWindow::~SandboxWindow() = default;
+void SandboxWindow::resizeEvent(QResizeEvent *event) {
+    QMainWindow::resizeEvent(event);
+    if (splash_ && centralWidget())
+        splash_->setGeometry(centralWidget()->rect());
+}
+
+SandboxWindow::~SandboxWindow() {
+    shuttingDown_ = true;
+    // Stop the runners before the child QObjects are deleted, and detach
+    // their signals: during QWidget teardown QProcess may still emit
+    // finished/exited while our member hashes are already gone.
+    const auto runners = runners_.values();
+    for (ProcessRunner *r : runners) {
+        r->terminate(150);
+        disconnect(r, nullptr, this, nullptr);
+    }
+}
 
 // -- spawning ----------------------------------------------------------
 
@@ -147,6 +177,8 @@ void SandboxWindow::openExeFile() {
 // -- window discovery --------------------------------------------------
 
 void SandboxWindow::poll() {
+    if (shuttingDown_)
+        return;
     // Try to adopt windows of every running process.
     const QList<qint64> pids = runners_.keys();
     for (qint64 pid : pids)
@@ -274,6 +306,8 @@ void SandboxWindow::handleTaskClicked(EmbeddedWindow *w) {
 // -- xcb events --------------------------------------------------------
 
 bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message, qintptr *) {
+    if (shuttingDown_)
+        return false;
     if (eventType != "xcb_generic_event_t")
         return false;
     auto *event = static_cast<xcb_generic_event_t *>(message);

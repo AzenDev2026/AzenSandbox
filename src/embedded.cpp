@@ -4,66 +4,135 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPushButton>
+#include <QPainterPath>
 #include <QVBoxLayout>
 
 #include "theme.h"
 #include "x11.h"
 
+// ---------------------------------------------------------------- caption --
+
+CaptionButton::CaptionButton(Kind kind, QWidget *parent) : QWidget(parent), kind_(kind) {
+    setFixedSize(46, 36);
+    setCursor(Qt::ArrowCursor);
+    setMouseTracking(true);
+}
+
+void CaptionButton::paintEvent(QPaintEvent *) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    QColor bg = Qt::transparent;
+    if (hover_) {
+        bg = (kind_ == Close) ? QColor(196, 43, 28) : QColor(255, 255, 255, 26);
+    } else if (pressed_) {
+        bg = (kind_ == Close) ? QColor(170, 35, 24) : QColor(255, 255, 255, 40);
+    }
+    if (bg.alpha() > 0) {
+        p.setPen(Qt::NoPen);
+        p.setBrush(bg);
+        p.drawRoundedRect(rect().adjusted(7, 4, -7, -4), 4, 4);
+    }
+
+    p.setPen(QPen(QColor(230, 230, 230), 1.2));
+    const QRectF area = rect().adjusted(16, 10, -16, -10);
+    switch (kind_) {
+    case Minimize:
+        p.drawLine(QPointF(area.left(), area.center().y()),
+                   QPointF(area.right(), area.center().y()));
+        break;
+    case Maximize:
+        p.drawRoundedRect(area, 1.5, 1.5);
+        break;
+    case Close:
+        p.drawLine(area.topLeft(), area.bottomRight());
+        p.drawLine(area.topRight(), area.bottomLeft());
+        break;
+    }
+}
+
+void CaptionButton::enterEvent(QEnterEvent *) { hover_ = true; update(); }
+void CaptionButton::leaveEvent(QEvent *) { hover_ = false; update(); }
+void CaptionButton::mousePressEvent(QMouseEvent *e) {
+    if (e->button() == Qt::LeftButton) {
+        pressed_ = true;
+        update();
+    }
+}
+void CaptionButton::mouseReleaseEvent(QMouseEvent *e) {
+    const bool wasPressed = pressed_;
+    pressed_ = false;
+    update();
+    if (e->button() == Qt::LeftButton && wasPressed && rect().contains(e->position().toPoint()))
+        emit clicked();
+}
+
+// ------------------------------------------------------------- main frame --
+
 EmbeddedWindow::EmbeddedWindow(const QString &title, QWidget *parent)
     : QWidget(parent), title_(title) {
     setObjectName("embedFrame");
     setAttribute(Qt::WA_DeleteOnClose);
+    setAttribute(Qt::WA_TranslucentBackground);
 
     auto *outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setContentsMargins(SHADOW, SHADOW, SHADOW, SHADOW);
     outer->setSpacing(0);
 
-    titlebar_ = new QWidget(this);
-    titlebar_->setObjectName("embedTitlebar");
+    frame_ = new QWidget(this);
+    frame_->setObjectName("embedSurface");
+    auto *frameLayout = new QVBoxLayout(frame_);
+    frameLayout->setContentsMargins(1, 1, 1, 1);
+    frameLayout->setSpacing(0);
+
+    titlebar_ = new QWidget(frame_);
     titlebar_->setFixedHeight(TITLEBAR_H);
     titlebar_->setMouseTracking(true);
 
     auto *bar = new QHBoxLayout(titlebar_);
-    bar->setContentsMargins(8, 0, 4, 0);
-    bar->setSpacing(4);
+    bar->setContentsMargins(10, 0, 2, 0);
+    bar->setSpacing(0);
 
     iconLabel_ = new QLabel(titlebar_);
-    iconLabel_->setFixedSize(18, 18);
+    iconLabel_->setFixedSize(20, 20);
     iconLabel_->setAlignment(Qt::AlignCenter);
-    iconLabel_->setText(QStringLiteral("🐳"));
     bar->addWidget(iconLabel_);
+    bar->addSpacing(8);
 
+    // Left spacer balances the caption buttons so the title is centred.
+    bar->addStretch(1);
     titleLabel_ = new QLabel(title, titlebar_);
-    titleLabel_->setObjectName("embedTitle");
-    titleLabel_->setStyleSheet(QStringLiteral("border: none; background: transparent;"));
-    bar->addWidget(titleLabel_, 1);
+    titleLabel_->setAlignment(Qt::AlignCenter);
+    bar->addWidget(titleLabel_, 0);
+    bar->addStretch(1);
+    // Reclaim the 138 px the buttons need so the title truly centres.
+    auto *balance = new QWidget(titlebar_);
+    balance->setFixedWidth(46 * 3 - 10 - 8);
+    bar->addWidget(balance);
 
-    auto makeButton = [&](const QString &text, const QString &name) {
-        auto *b = new QPushButton(text, titlebar_);
-        b->setObjectName(name);
-        b->setFixedSize(34, 26);
-        b->setFocusPolicy(Qt::NoFocus);
-        b->setCursor(Qt::ArrowCursor);
-        bar->addWidget(b);
-        return b;
-    };
-    minBtn_ = makeButton(QStringLiteral("–"), "embedMin");
-    maxBtn_ = makeButton(QStringLiteral("□"), "embedMax");
-    closeBtn_ = makeButton(QStringLiteral("✕"), "embedClose");
+    minBtn_ = new CaptionButton(CaptionButton::Minimize, titlebar_);
+    maxBtn_ = new CaptionButton(CaptionButton::Maximize, titlebar_);
+    closeBtn_ = new CaptionButton(CaptionButton::Close, titlebar_);
+    bar->addWidget(minBtn_);
+    bar->addWidget(maxBtn_);
+    bar->addWidget(closeBtn_);
 
-    content_ = new QWidget(this);
+    frameLayout->addWidget(titlebar_);
+
+    content_ = new QWidget(frame_);
     content_->setObjectName("embedContent");
     content_->setAttribute(Qt::WA_NativeWindow);
     content_->setAttribute(Qt::WA_OpaquePaintEvent);
     content_->setAttribute(Qt::WA_PaintOnScreen);
-    outer->addWidget(content_, 1);
+    frameLayout->addWidget(content_, 1);
 
-    connect(minBtn_, &QPushButton::clicked, this, [this]() {
+    outer->addWidget(frame_);
+
+    connect(minBtn_, &CaptionButton::clicked, this, [this]() {
         minimized_ ? restore() : minimize();
     });
-    connect(maxBtn_, &QPushButton::clicked, this, &EmbeddedWindow::toggleMaximize);
-    connect(closeBtn_, &QPushButton::clicked, this, [this]() { emit closeRequested(this); });
+    connect(maxBtn_, &CaptionButton::clicked, this, &EmbeddedWindow::toggleMaximize);
+    connect(closeBtn_, &CaptionButton::clicked, this, [this]() { emit closeRequested(this); });
 
     content_->installEventFilter(this);
     titlebar_->installEventFilter(this);
@@ -71,6 +140,13 @@ EmbeddedWindow::EmbeddedWindow(const QString &title, QWidget *parent)
 }
 
 EmbeddedWindow::~EmbeddedWindow() = default;
+
+void EmbeddedWindow::applyStyle() {
+    titleLabel_->setStyleSheet(QStringLiteral(
+        "color: %1; font-size: 12px; background: transparent;")
+        .arg(active_ ? gTheme.text.name() : gTheme.textDim.name()));
+    update();
+}
 
 void EmbeddedWindow::setTitleIcon(const QIcon &icon) {
     if (icon.isNull())
@@ -85,27 +161,12 @@ void EmbeddedWindow::setWindowTitleText(const QString &title) {
     titleLabel_->setText(title);
 }
 
-void EmbeddedWindow::applyStyle() {
-    setStyleSheet(QStringLiteral(
-        "#embedFrame { background: %1; border: 1px solid %2; }"
-        "#embedTitlebar { background: %3; }"
-        "#embedTitle { color: %4; font-size: 12px; }"
-        "#embedMin, #embedMax, #embedClose { border: none; background: transparent;"
-        "  color: %4; font-size: 14px; border-radius: 4px; }"
-        "#embedMin:hover, #embedMax:hover { background: %5; }"
-        "#embedClose:hover { background: %6; color: white; }")
-        .arg(active_ ? gTheme.viewBg.lighter(112).name() : gTheme.viewBg.name(),
-             active_ ? gTheme.accent.name() : gTheme.border.name(),
-             active_ ? gTheme.buttonBg.name() : gTheme.viewBg.name(),
-             active_ ? gTheme.text.name() : gTheme.textDim.name(),
-             gTheme.buttonBg.name(), gTheme.closeHover.name()));
-}
-
 void EmbeddedWindow::attach(xcb_window_t xid) {
     xid_ = xid;
     content_->winId(); // force the native window to exist
     X11::reparent(xid, static_cast<xcb_window_t>(content_->winId()));
     X11::moveResize(xid, 0, 0, content_->width(), content_->height());
+    X11::roundBottomCorners(xid, content_->width(), content_->height(), RADIUS);
     X11::mapWindow(xid);
     X11::selectEmbedEvents(xid);
     X11::flush();
@@ -171,15 +232,13 @@ bool EmbeddedWindow::eventFilter(QObject *watched, QEvent *event) {
     return QWidget::eventFilter(watched, event);
 }
 
-void EmbeddedWindow::moveEvent(QMoveEvent *event) {
-    QWidget::moveEvent(event);
-    syncChildGeometry();
-}
-
 void EmbeddedWindow::syncChildGeometry() {
     if (!xid_)
         return;
-    X11::moveResize(xid_, 0, 0, content_->width(), content_->height());
+    const int w = content_->width();
+    const int h = content_->height();
+    X11::moveResize(xid_, 0, 0, w, h);
+    X11::roundBottomCorners(xid_, w, h, RADIUS);
     X11::flush();
 }
 
@@ -195,4 +254,26 @@ void EmbeddedWindow::dragFromTitlebar(QMouseEvent *event) {
         dragging_ = false;
         event->accept();
     }
+}
+
+void EmbeddedWindow::paintEvent(QPaintEvent *) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const QRectF surface = QRectF(rect()).adjusted(SHADOW, SHADOW, -SHADOW, -SHADOW);
+
+    // Soft drop shadow.
+    const int layers = active_ ? 4 : 3;
+    for (int i = 0; i < layers; ++i) {
+        const double grow = (i + 1) * 2.5;
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, int((active_ ? 26 : 18) * (layers - i) / layers)));
+        p.drawRoundedRect(surface.adjusted(-grow, -grow + i, grow, grow + i),
+                          RADIUS + grow, RADIUS + grow);
+    }
+
+    // Window surface.
+    p.setPen(QPen(active_ ? QColor(gTheme.accent).darker(140) : QColor(45, 45, 50), 1));
+    p.setBrush(active_ ? QColor(35, 37, 42) : QColor(30, 30, 33));
+    p.drawRoundedRect(surface, RADIUS, RADIUS);
 }

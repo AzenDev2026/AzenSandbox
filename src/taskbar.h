@@ -1,16 +1,31 @@
-// The bottom panel: start button, pinned apps, task buttons for every
-// embedded window, a toy tray and the clock — modelled on the user's
-// Plasma panel (48 px, solid #202020).
+// The Windows-11-style taskbar: a centred cluster (start, pinned, tasks)
+// with the tray and clock on the right.
 #pragma once
 
 #include <QHash>
+#include <QHBoxLayout>
 #include <QIcon>
+#include <QToolButton>
 #include <QWidget>
 
 class EmbeddedWindow;
 class QLabel;
 class QToolButton;
 class StartMenu;
+
+//: A task button with the little Win11 active underline.
+class TaskButton : public QToolButton {
+    Q_OBJECT
+public:
+    TaskButton(QWidget *parent);
+    void setActiveUnderline(bool on);
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    bool activeUnderline_ = false;
+};
 
 class Taskbar : public QWidget {
     Q_OBJECT
@@ -36,6 +51,8 @@ private:
 
     StartMenu *menu_ = nullptr;
     QToolButton *startBtn_ = nullptr;
-    QHash<EmbeddedWindow *, QToolButton *> tasks_;
+    QWidget *taskArea_ = nullptr;
+    QHBoxLayout *taskLayout_ = nullptr;
+    QHash<EmbeddedWindow *, TaskButton *> tasks_;
     QLabel *clock_ = nullptr;
 };

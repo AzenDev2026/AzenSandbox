@@ -19,27 +19,28 @@
 StartMenu::StartMenu(QWidget *parent) : QWidget(parent) {
     setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
-    setFixedSize(620, 520);
+    setFixedSize(640, 540);
 
     auto *effect = new QGraphicsDropShadowEffect(this);
-    effect->setBlurRadius(28);
-    effect->setOffset(0, 6);
-    effect->setColor(QColor(0, 0, 0, 160));
+    effect->setBlurRadius(30);
+    effect->setOffset(0, 8);
+    effect->setColor(QColor(0, 0, 0, 180));
     setGraphicsEffect(effect);
 
     auto *outer = new QVBoxLayout(this);
-    outer->setContentsMargins(14, 14, 14, 12);
-    outer->setSpacing(10);
+    outer->setContentsMargins(24, 22, 24, 16);
+    outer->setSpacing(12);
 
     search_ = new QLineEdit(this);
-    search_->setPlaceholderText(QStringLiteral("Search apps…"));
+    search_->setPlaceholderText(QStringLiteral("Search apps"));
     search_->setClearButtonEnabled(true);
+    search_->setFixedHeight(38);
     search_->setStyleSheet(QStringLiteral(
-        "QLineEdit { background: %1; border: 1px solid %2; border-radius: 10px;"
-        "  padding: 8px 12px; color: %3; font-size: 13px; }"
-        "QLineEdit:focus { border-color: %4; }")
-        .arg(gTheme.buttonBg.name(), gTheme.border.name(), gTheme.text.name(),
-             gTheme.accent.name()));
+        "QLineEdit { background: %1; border: 1px solid %2; border-radius: 19px;"
+        "  padding: 0 16px; color: %3; font-size: 13px; }"
+        "QLineEdit:focus { border-color: %4; border-width: 2px; }")
+        .arg(QColor(255, 255, 255, 22).name(QColor::HexArgb), gTheme.border.name(),
+             gTheme.text.name(), gTheme.accent.name()));
     connect(search_, &QLineEdit::textChanged, this, &StartMenu::rebuild);
     outer->addWidget(search_);
 
@@ -50,7 +51,7 @@ StartMenu::StartMenu(QWidget *parent) : QWidget(parent) {
     scrollContent_ = new QWidget(scroll);
     grid_ = new QGridLayout(scrollContent_);
     grid_->setContentsMargins(0, 0, 0, 0);
-    grid_->setSpacing(6);
+    grid_->setSpacing(4);
     scroll->setWidget(scrollContent_);
     outer->addWidget(scroll, 1);
 
@@ -64,10 +65,10 @@ StartMenu::StartMenu(QWidget *parent) : QWidget(parent) {
     bottom->addStretch(1);
     auto *shutdown = new QPushButton(QStringLiteral("⏻  Shut Down Sandbox"), this);
     shutdown->setStyleSheet(QStringLiteral(
-        "QPushButton { background: %1; color: white; border: none; border-radius: 8px;"
-        "  padding: 8px 14px; font-weight: bold; }"
-        "QPushButton:hover { background: %2; }")
-        .arg(gTheme.closeHover.name(), gTheme.closeHover.lighter(120).name()));
+        "QPushButton { background: rgba(255,255,255,0.07); color: white; border: 1px solid %1;"
+        "  border-radius: 6px; padding: 8px 14px; }"
+        "QPushButton:hover { background: %2; border-color: %2; }")
+        .arg(gTheme.border.name(), gTheme.closeHover.name()));
     connect(shutdown, &QPushButton::clicked, this, [this]() { emit shutdownRequested(); });
     bottom->addWidget(shutdown);
     outer->addLayout(bottom);
@@ -103,14 +104,14 @@ void StartMenu::rebuild(const QString &filter) {
         auto *b = new QToolButton(scrollContent_);
         b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         b->setIcon(app.themedIcon());
-        b->setIconSize(QSize(30, 30));
+        b->setIconSize(QSize(28, 28));
         b->setText(app.name);
-        b->setFixedSize(140, 74);
+        b->setFixedSize(138, 76);
         b->setToolTip(app.comment);
         b->setStyleSheet(QStringLiteral(
-            "QToolButton { background: transparent; border: none; border-radius: 10px;"
+            "QToolButton { background: transparent; border: none; border-radius: 4px;"
             "  color: %1; font-size: 11px; }"
-            "QToolButton:hover { background: rgba(255,255,255,0.08); }")
+            "QToolButton:hover { background: rgba(255,255,255,0.07); }")
             .arg(gTheme.text.name()));
         connect(b, &QToolButton::clicked, this, [this, id = app.id]() {
             emit appLaunchRequested(id);
@@ -127,7 +128,7 @@ void StartMenu::rebuild(const QString &filter) {
         b->setIcon(QIcon::fromTheme(QStringLiteral("wine")));
         b->setIconSize(QSize(30, 30));
         b->setText(emoji + QStringLiteral(" ") + name);
-        b->setFixedSize(140, 74);
+        b->setFixedSize(138, 76);
         b->setStyleSheet(QStringLiteral(
             "QToolButton { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);"
             "  border-radius: 10px; color: %1; font-size: 11px; }"
@@ -152,7 +153,7 @@ void StartMenu::rebuild(const QString &filter) {
         openExe->setIcon(QIcon::fromTheme(QStringLiteral("document-open")));
         openExe->setIconSize(QSize(30, 30));
         openExe->setText(QStringLiteral("Open a .exe…"));
-        openExe->setFixedSize(140, 74);
+        openExe->setFixedSize(138, 76);
         openExe->setStyleSheet(QStringLiteral(
             "QToolButton { background: transparent; border: 1px dashed rgba(255,255,255,0.25);"
             "  border-radius: 10px; color: %1; font-size: 11px; }"
@@ -193,7 +194,7 @@ void StartMenu::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event);
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QPen(gTheme.border, 1));
-    p.setBrush(gTheme.windowBg);
-    p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 14, 14);
+    p.setPen(QPen(QColor(255, 255, 255, 26), 1));
+    p.setBrush(QColor(32, 32, 36));
+    p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 8, 8);
 }

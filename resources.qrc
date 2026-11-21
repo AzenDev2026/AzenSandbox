@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/assets">
+        <file alias="azen-sandbox.png">assets/azen-sandbox.png</file>
+    </qresource>
+</RCC>

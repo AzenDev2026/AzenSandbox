@@ -14,6 +14,7 @@ class DesktopWidget;
 class EmbeddedWindow;
 class ProcessRunner;
 class Taskbar;
+class BootSplash;
 
 class SandboxWindow : public QMainWindow, public QAbstractNativeEventFilter {
     Q_OBJECT
@@ -26,6 +27,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 public slots:
     void launchById(const QString &desktopId);
@@ -47,6 +49,7 @@ private:
 
     DesktopWidget *desktop_ = nullptr;
     Taskbar *taskbar_ = nullptr;
+    BootSplash *splash_ = nullptr;
     QTimer *pollTimer_ = nullptr;
 
     QHash<qint64, ProcessRunner *> runners_;
@@ -60,4 +63,5 @@ private:
     EmbeddedWindow *active_ = nullptr;
     int cascade_ = 0;
     bool testMode_ = false;
+    bool shuttingDown_ = false;
 };

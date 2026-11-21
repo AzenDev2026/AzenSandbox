@@ -8,6 +8,12 @@ pulled into the sandbox. Windows programs work too, through Wine.
 
 ## What it can do
 
+- 🎬 **A 5-second boot animation**: 2 seconds of streaming code output with
+  the NVazen Linux logo, then a 3-second macOS-style progress bar, then the
+  desktop fades in.
+- 🪟 **Windows 11 look**: centred taskbar, rounded self-drawn window frames
+  with soft shadows and caption buttons — no app's original decoration is
+  ever shown.
 - 🖥️ **A toy desktop** styled after your KDE Plasma look: it reads your
   wallpaper, colors, font and icon theme automatically.
 - 🚀 **Start menu**: search box, app grid, a Windows (Wine) section and a
@@ -17,6 +23,8 @@ pulled into the sandbox. Windows programs work too, through Wine.
 - 🍷 **Wine inside the sandbox**: Notepad, Calculator, Regedit or any `.exe`
   you pick — the wine window lands inside the sandbox like any other app.
 - ⏻ Closing the sandbox shuts down every app that lives in it.
+
+Skip the boot animation with `AZS_NO_BOOT=1 azen-sandbox`.
 
 ## How it works
 
@@ -61,13 +69,14 @@ all run inside the sandbox.
 ```
 src/
   main.cpp        entry point (forces the xcb platform)
+  boot.cpp        5-second boot splash (code output, logo, progress bar)
   theme.cpp       reads the KDE Plasma look (colors, font, wallpaper, icons)
   apps.cpp        parses .desktop files into launchable entries
-  x11.cpp         xcb helpers (reparent, focus, titles, WM_DELETE …)
+  x11.cpp         xcb helpers (reparent, focus, titles, XShape, WM_DELETE …)
   proc.cpp        runs apps in their own process group (setsid)
-  embedded.cpp    window frame that hosts a foreign X window
+  embedded.cpp    self-drawn Win11 window frame hosting a foreign X window
   desktop.cpp     wallpaper + desktop icons
-  taskbar.cpp     bottom panel: start button, tasks, tray, clock
+  taskbar.cpp     Win11 centred taskbar: start button, tasks, tray, clock
   startmenu.cpp   search + app grid + Wine section
   sandbox.cpp     the toy window manager: discovery, embedding, focus
 ```
