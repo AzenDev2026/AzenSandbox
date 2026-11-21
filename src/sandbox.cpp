@@ -353,6 +353,20 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
         return false;
     }
 
+    // The nested Xephyr screen was resized (user dragged the sandbox
+    // window): make the sandbox fill the new size exactly.
+    if (type == XCB_CONFIGURE_NOTIFY) {
+        auto *cfg = reinterpret_cast<xcb_configure_notify_event_t *>(event);
+        if (cfg->event == X11::rootWindow() && cfg->window == X11::rootWindow() &&
+            qEnvironmentVariableIsSet("AZS_INSIDE_XEPHYR")) {
+            if (cfg->width > 100 && cfg->height > 100 &&
+                QSize(cfg->width, cfg->height) != size()) {
+                setFixedSize(cfg->width, cfg->height);
+            }
+            return false;
+        }
+    }
+
     switch (type) {
     case XCB_BUTTON_PRESS: {
         auto *press = reinterpret_cast<xcb_button_press_event_t *>(event);
@@ -426,6 +440,10 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
 // -- lifecycle ---------------------------------------------------------
 
 void SandboxWindow::toggleFullscreen() {
+    // Inside the nested display the sandbox already fills the whole screen;
+    // fullscreen toggling only makes sense on the host display.
+    if (qEnvironmentVariableIsSet("AZS_INSIDE_XEPHYR"))
+        return;
     if (isFullScreen())
         showNormal();
     else

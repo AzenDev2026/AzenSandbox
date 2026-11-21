@@ -1,3 +1,5 @@
 build/
 test-shot.png
 screen-capture.png
+shot-*.png
+crop-*.png

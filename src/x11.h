@@ -16,6 +16,7 @@ public:
     //: Qt's xcb connection (nullptr when the platform is not xcb).
     static xcb_connection_t *connection();
     static xcb_window_t rootWindow();
+    static QSize screenSize();
     static void flush();
 
     static QVector<xcb_window_t> topLevelWindows();

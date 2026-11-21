@@ -125,6 +125,18 @@ Taskbar::Taskbar(QWidget *parent) : QWidget(parent) {
     connect(timer, &QTimer::timeout, this, &Taskbar::updateClock);
     timer->start();
     updateClock();
+
+    if (qEnvironmentVariableIsSet("AZS_DEBUG_TASKBAR")) {
+        QTimer::singleShot(1500, this, [this]() {
+            const QPoint g = startBtn_->mapToGlobal(QPoint(0, 0));
+            fprintf(stderr,
+                    "TASKBAR_DEBUG taskbar_y=%d taskbar_h=%d start_global=(%d,%d) start_size=(%d,%d) "
+                    "enabled=%d visible=%d underMouse=%d\n",
+                    mapToGlobal(QPoint(0, 0)).y(), height(), g.x(), g.y(),
+                    startBtn_->width(), startBtn_->height(), startBtn_->isEnabled(),
+                    startBtn_->isVisible(), startBtn_->underMouse());
+        });
+    }
 }
 
 QToolButton *Taskbar::makeIconButton(const QIcon &icon, const QString &tooltip) {

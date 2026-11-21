@@ -69,6 +69,16 @@ xcb_window_t X11::rootWindow() {
     return screen ? screen->root : 0;
 }
 
+QSize X11::screenSize() {
+    xcb_connection_t *c = connection();
+    if (!c)
+        return QSize();
+    xcb_screen_t *screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+    if (!screen)
+        return QSize();
+    return QSize(screen->width_in_pixels, screen->height_in_pixels);
+}
+
 void X11::flush() {
     if (xcb_connection_t *c = connection())
         xcb_flush(c);
@@ -388,6 +398,9 @@ void X11::watchRootSubstructure() {
     const xcb_window_t root = rootWindow();
     if (!c || !root)
         return;
-    const uint32_t mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+    // Map events for instant adoption + root resizes (Xephyr screen growth)
+    // so the sandbox window follows its nested screen.
+    const uint32_t mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
+                          XCB_EVENT_MASK_STRUCTURE_NOTIFY;
     xcb_change_window_attributes(c, root, XCB_CW_EVENT_MASK, &mask);
 }

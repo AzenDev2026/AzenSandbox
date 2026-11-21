@@ -121,10 +121,14 @@ int main(int argc, char *argv[]) {
     SandboxWindow window;
     if (nested) {
         // Inside the nested display there is no window manager: run
-        // frameless and fullscreen. Closing the Xephyr window closes
-        // the sandbox world (Xephyr -reset also exits on last client).
+        // frameless and size the window to the screen EXACTLY (a mismatch
+        // clips the taskbar below the screen edge). The sandbox follows
+        // nested-screen resizes via root ConfigureNotify.
         window.setWindowFlags(window.windowFlags() | Qt::FramelessWindowHint);
-        window.showFullScreen();
+        const QSize screenSize = X11::screenSize();
+        window.setFixedSize(screenSize.width() > 0 ? screenSize : QSize(1280, 720));
+        window.move(0, 0);
+        window.show();
     } else {
         if (!qEnvironmentVariableIsSet("AZS_TEST")) {
             // After the boot splash (5 s) let the user know about fallback
