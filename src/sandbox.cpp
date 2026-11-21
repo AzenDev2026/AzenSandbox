@@ -114,9 +114,12 @@ void SandboxWindow::resizeEvent(QResizeEvent *event) {
 
 SandboxWindow::~SandboxWindow() {
     shuttingDown_ = true;
-    // Stop the runners before the child QObjects are deleted, and detach
-    // their signals: during QWidget teardown QProcess may still emit
-    // finished/exited while our member hashes are already gone.
+    // First sever every embedded app's X connection (XKillClient): a client
+    // stuck in a blocking X call cannot be signalled, but killing its
+    // connection makes Qt/KDE apps quit. Then stop the process groups.
+    for (auto it = byXid_.constBegin(); it != byXid_.constEnd(); ++it)
+        X11::killClientConnection(it.key());
+    X11::flush();
     const auto runners = runners_.values();
     for (ProcessRunner *r : runners) {
         r->terminate(150);
@@ -273,14 +276,16 @@ void SandboxWindow::embedWindow(xcb_window_t w, long pid) {
     connect(ew, &EmbeddedWindow::closeRequested, this, [this](EmbeddedWindow *win) {
         const qint64 pid = windowPid_.value(win, -1);
         X11::requestClose(win->xid());
-        // Whatever the app does with WM_DELETE, make sure the process group
-        // is gone shortly after — closing must never leave a zombie app.
-        if (pid > 0 && runners_.contains(pid)) {
-            QTimer::singleShot(1500, this, [this, pid]() {
-                if (runners_.contains(pid))
-                    runners_.value(pid)->terminate();
-            });
-        }
+        // Whatever the app does with WM_DELETE, make sure it is gone shortly
+        // after: kill the X connection AND the process group. A client stuck
+        // in a blocking X call cannot be signalled, but a severed connection
+        // makes Qt/KDE apps quit.
+        QTimer::singleShot(1500, this, [this, win, pid]() {
+            X11::killClientConnection(win->xid());
+            X11::flush();
+            if (pid > 0 && runners_.contains(pid))
+                runners_.value(pid)->terminate();
+        });
     });
     connect(ew, &EmbeddedWindow::stateChanged, this,
             [this](EmbeddedWindow *win) { taskbar_->refreshTask(win); });
@@ -455,9 +460,14 @@ void SandboxWindow::shutdownSandbox() {
 }
 
 void SandboxWindow::closeEvent(QCloseEvent *event) {
+    // Sever every embedded app's X connection first, then terminate the
+    // process groups — closing the sandbox must never leave zombies behind.
+    for (auto it = byXid_.constBegin(); it != byXid_.constEnd(); ++it)
+        X11::killClientConnection(it.key());
+    X11::flush();
     const auto runners = runners_.values();
     for (ProcessRunner *r : runners)
-        r->terminate(1200);
+        r->terminate(800);
     QMainWindow::closeEvent(event);
 }
 
