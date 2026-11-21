@@ -1,6 +1,6 @@
 // A fully self-drawn Windows-11-style window frame. The real app window is
-// reparented into the content area (with XShape-rounded bottom corners), so
-// no original decoration of any app is ever shown.
+// reparented into the content area and renders directly, with XShape-rounded
+// bottom corners; no original decoration of any app is ever shown.
 #pragma once
 
 #include <QWidget>
@@ -39,8 +39,6 @@ public:
     void attach(xcb_window_t xid);
     xcb_window_t xid() const { return xid_; }
     QString title() const { return title_; }
-    bool isRedirected() const { return redirected_; }
-    bool hasContents() const { return !contents_.isNull(); }
 
     void setActive(bool on);
     bool isActive() const { return active_; }
@@ -52,8 +50,12 @@ public:
     void toggleMaximize();
     bool isMaximized() const { return maximized_; }
 
-    //: Refetch the app's pixels and repaint (called on damage events / timer).
-    void refreshContents();
+    //: Follow the app's own initial size negotiation ONCE (dialog-sized
+    //   windows shrink to fit); later self-resizes are ignored.
+    void adoptAppSize(const QSize &size);
+
+    //: Ask the sandbox to close this window (same as clicking ✕).
+    void requestClose();
 
     static constexpr int TITLEBAR_H = 36;
     static constexpr int SHADOW = 16;   // margin reserved for the drop shadow
@@ -85,9 +87,7 @@ private:
     bool active_ = false;
     bool minimized_ = false;
     bool maximized_ = false;
-    bool redirected_ = false;
-    QPixmap contents_;
-    QTimer *refreshTimer_ = nullptr;
+    bool sizeAdopted_ = false;
     QRect restoreGeom_;
     bool dragging_ = false;
     QPoint dragOffset_;

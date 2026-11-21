@@ -9,7 +9,6 @@
 #include <QSet>
 #include <QTimer>
 #include <xcb/xcb.h>
-#include <xcb/damage.h>
 
 class DesktopWidget;
 class EmbeddedWindow;
@@ -64,7 +63,6 @@ private:
     QHash<qint64, bool> pidHasWindow_;
     QSet<xcb_window_t> seenTopLevels_;
     QHash<xcb_window_t, EmbeddedWindow *> byXid_;
-    QHash<xcb_window_t, xcb_damage_damage_t> damagesByXid_;
     QHash<EmbeddedWindow *, qint64> windowPid_;
     EmbeddedWindow *active_ = nullptr;
     int cascade_ = 0;

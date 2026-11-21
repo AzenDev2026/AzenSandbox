@@ -27,6 +27,9 @@ public:
 
     static void reparent(xcb_window_t child, xcb_window_t parent);
     static void moveResize(xcb_window_t w, int x, int y, int width, int height);
+    //: Round the BOTTOM corners of the window with XShape (no-op when the
+    //   extension is missing) so the app content matches the rounded frame.
+    static void roundBottomCorners(xcb_window_t w, int width, int height, int radius);
     static void mapWindow(xcb_window_t w);
     static void unmapWindow(xcb_window_t w);
     static void raiseWindow(xcb_window_t w);

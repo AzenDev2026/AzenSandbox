@@ -273,9 +273,11 @@ void SandboxWindow::embedWindow(xcb_window_t w, long pid) {
     connect(ew, &EmbeddedWindow::closeRequested, this, [this](EmbeddedWindow *win) {
         const qint64 pid = windowPid_.value(win, -1);
         X11::requestClose(win->xid());
+        // Whatever the app does with WM_DELETE, make sure the process group
+        // is gone shortly after — closing must never leave a zombie app.
         if (pid > 0 && runners_.contains(pid)) {
-            QTimer::singleShot(1500, this, [this, win, pid]() {
-                if (X11::windowAlive(win->xid()) && runners_.contains(pid))
+            QTimer::singleShot(1500, this, [this, pid]() {
+                if (runners_.contains(pid))
                     runners_.value(pid)->terminate();
             });
         }
@@ -284,9 +286,6 @@ void SandboxWindow::embedWindow(xcb_window_t w, long pid) {
             [this](EmbeddedWindow *win) { taskbar_->refreshTask(win); });
     byXid_.insert(w, ew);
     windowPid_.insert(ew, pid);
-    const xcb_damage_damage_t damage = X11::createDamage(w);
-    if (damage != XCB_NONE)
-        damagesByXid_.insert(w, damage);
     ew->show();
     ew->attach(w);
     taskbar_->addTask(ew, pidIcons_.value(pid));
@@ -312,7 +311,6 @@ void SandboxWindow::activateWindow(EmbeddedWindow *w, bool focus) {
 
 void SandboxWindow::removeWindow(EmbeddedWindow *w) {
     byXid_.remove(w->xid());
-    damagesByXid_.remove(w->xid());
     windowPid_.remove(w);
     if (active_ == w)
         active_ = nullptr;
@@ -341,26 +339,12 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
     auto *event = static_cast<xcb_generic_event_t *>(message);
     const uint8_t type = event->response_type & ~0x80;
 
-    // Freshly mapped windows: adopt (and redirect) immediately, so an app
-    // window is never visible outside the sandbox.
+    // Freshly mapped windows: adopt immediately, so an app window is never
+    // visible outside the sandbox.
     if (type == XCB_MAP_NOTIFY) {
         auto *map = reinterpret_cast<xcb_map_notify_event_t *>(event);
         if (map->window != static_cast<xcb_window_t>(winId()) && !byXid_.contains(map->window))
             tryEmbedAll();
-        return false;
-    }
-
-    // Composited contents changed: repaint that window.
-    const uint8_t damageEvent = X11::damageNotifyEvent();
-    if (damageEvent && type == damageEvent + XCB_DAMAGE_NOTIFY) {
-        auto *dn = reinterpret_cast<xcb_damage_notify_event_t *>(event);
-        EmbeddedWindow *w = byXid_.value(dn->drawable, nullptr);
-        if (w) {
-            const xcb_damage_damage_t damage = damagesByXid_.value(dn->drawable, XCB_NONE);
-            if (damage != XCB_NONE)
-                X11::subtractDamage(damage);
-            w->refreshContents();
-        }
         return false;
     }
 
@@ -385,22 +369,34 @@ bool SandboxWindow::nativeEventFilter(const QByteArray &eventType, void *message
     case XCB_DESTROY_NOTIFY: {
         auto *destroy = reinterpret_cast<xcb_destroy_notify_event_t *>(event);
         EmbeddedWindow *w = byXid_.value(destroy->window, nullptr);
-        if (w)
+        if (w) {
+            const qint64 pid = windowPid_.value(w, -1);
             removeWindow(w);
+            // The app closed its own window: if it has no window left in the
+            // sandbox, its process must not linger either.
+            if (pid > 0 && runners_.contains(pid)) {
+                bool anyLeft = false;
+                for (auto it = windowPid_.constBegin(); it != windowPid_.constEnd(); ++it) {
+                    if (it.value() == pid) {
+                        anyLeft = true;
+                        break;
+                    }
+                }
+                if (!anyLeft)
+                    QTimer::singleShot(800, this, [this, pid]() {
+                        if (runners_.contains(pid))
+                            runners_.value(pid)->terminate();
+                    });
+            }
+        }
         break;
     }
     case XCB_CONFIGURE_NOTIFY: {
         auto *cfg = reinterpret_cast<xcb_configure_notify_event_t *>(event);
         EmbeddedWindow *w = byXid_.value(cfg->window, nullptr);
         if (w && cfg->width > 1 && cfg->height > 1) {
-            // The app resized its own window: follow it, keep it at 0,0.
-            const int frameW = static_cast<int>(cfg->width);
-            const int frameH = static_cast<int>(cfg->height) + EmbeddedWindow::TITLEBAR_H;
-            if (w->size() != QSize(frameW, frameH) && !w->isMaximized()) {
-                w->resize(frameW, frameH);
-                X11::moveResize(cfg->window, 0, 0, cfg->width, cfg->height);
-                X11::flush();
-            }
+            // Follow the app's initial size negotiation once, then leave it.
+            w->adoptAppSize(QSize(cfg->width, cfg->height));
         }
         break;
     }
@@ -500,8 +496,6 @@ void SandboxWindow::runTestMode() {
             QJsonObject o;
             o.insert("title", it.value()->title());
             o.insert("minimized", it.value()->isMinimized());
-            o.insert("redirected", it.value()->isRedirected());
-            o.insert("painted", it.value()->hasContents());
             o.insert("x", it.value()->x());
             o.insert("y", it.value()->y());
             o.insert("w", it.value()->width());
@@ -526,6 +520,21 @@ void SandboxWindow::runTestMode() {
         fprintf(stdout, "AZS_TEST_REPORT %s\n",
                 QJsonDocument(report).toJson(QJsonDocument::Compact).constData());
         fflush(stdout);
+
+        // Close-path verification: simulate clicking ✕ on every window and
+        // confirm the spawned processes actually die.
+        if (qEnvironmentVariableIsSet("AZS_TEST_CLOSE")) {
+            const auto windows = byXid_.values();
+            for (EmbeddedWindow *win : windows)
+                win->requestClose();
+            QTimer::singleShot(3500, this, [this]() {
+                fprintf(stdout, "AZS_TEST_CLOSE runners_left=%d windows_left=%d\n",
+                        static_cast<int>(runners_.size()), static_cast<int>(byXid_.size()));
+                fflush(stdout);
+                QCoreApplication::quit();
+            });
+            return;
+        }
 
         // Screenshot for visual verification.
         QString shotPath = qEnvironmentVariable("AZS_TEST_SHOT");

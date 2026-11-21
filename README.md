@@ -12,10 +12,10 @@ pulled into the sandbox. Windows programs work too, through Wine.
   most of the window (with jerky, bursty rhythm like a real boot log) around
   the NVazen Linux logo, then a 3-second macOS-style progress bar, then the
   desktop fades in.
-- 🪟 **Fully self-drawn windows (compositor mode)**: app windows are
-  redirected off-screen with XComposite the instant they appear, and the
-  sandbox repaints their pixels itself into its own rounded, shadowed
-  Windows-11 frames — no app window is ever visible outside the sandbox.
+- 🪟 **Self-drawn Windows 11 windows**: app windows are adopted the instant
+  they appear (root-level map events) and reparented into the sandbox's own
+  rounded, shadowed frames with XShape-clipped corners — no app window is
+  ever visible outside the sandbox, and no original decoration is shown.
 - 🪟 **Windows 11 look**: centred taskbar, rounded self-drawn window frames
   with soft shadows and caption buttons.
 - 🖥️ **A toy desktop** styled after your KDE Plasma look: it reads your

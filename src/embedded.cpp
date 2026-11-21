@@ -123,7 +123,8 @@ EmbeddedWindow::EmbeddedWindow(const QString &title, QWidget *parent)
     content_ = new QWidget(frame_);
     content_->setObjectName("embedContent");
     content_->setAttribute(Qt::WA_NativeWindow);
-    content_->setAttribute(Qt::WA_NoSystemBackground);
+    content_->setAttribute(Qt::WA_OpaquePaintEvent);
+    content_->setAttribute(Qt::WA_PaintOnScreen);
     frameLayout->addWidget(content_, 1);
 
     outer->addWidget(frame_);
@@ -136,13 +137,6 @@ EmbeddedWindow::EmbeddedWindow(const QString &title, QWidget *parent)
 
     content_->installEventFilter(this);
     titlebar_->installEventFilter(this);
-
-    // Fallback refresh for the composited contents (damage events drive the
-    // normal path; this catches anything the extension misses).
-    refreshTimer_ = new QTimer(this);
-    refreshTimer_->setInterval(200);
-    connect(refreshTimer_, &QTimer::timeout, this, &EmbeddedWindow::refreshContents);
-
     applyStyle();
 }
 
@@ -173,14 +167,10 @@ void EmbeddedWindow::attach(xcb_window_t xid) {
     content_->winId(); // force the native window to exist
     X11::reparent(xid, static_cast<xcb_window_t>(content_->winId()));
     X11::moveResize(xid, 0, 0, content_->width(), content_->height());
+    X11::roundBottomCorners(xid, content_->width(), content_->height(), RADIUS);
     X11::mapWindow(xid);
     X11::selectEmbedEvents(xid);
-    // Hide the app's own rendering completely: the sandbox draws it.
-    redirected_ = X11::redirectWindow(xid);
     X11::flush();
-    if (redirected_)
-        refreshTimer_->start();
-    refreshContents();
 }
 
 void EmbeddedWindow::setActive(bool on) {
@@ -246,18 +236,24 @@ bool EmbeddedWindow::eventFilter(QObject *watched, QEvent *event) {
 void EmbeddedWindow::syncChildGeometry() {
     if (!xid_)
         return;
-    X11::moveResize(xid_, 0, 0, content_->width(), content_->height());
+    const int w = content_->width();
+    const int h = content_->height();
+    X11::moveResize(xid_, 0, 0, w, h);
+    X11::roundBottomCorners(xid_, w, h, RADIUS);
     X11::flush();
 }
 
-void EmbeddedWindow::refreshContents() {
-    if (!xid_ || !redirected_ || !isVisible())
+void EmbeddedWindow::adoptAppSize(const QSize &size) {
+    if (sizeAdopted_ || maximized_ || minimized_)
         return;
-    const QImage image = X11::windowContents(xid_);
-    if (image.isNull())
-        return;
-    contents_ = QPixmap::fromImage(image);
-    update();
+    sizeAdopted_ = true;
+    const int w = qBound(240, size.width(), 2000);
+    const int h = qBound(150, size.height(), 2000);
+    resize(w, h + TITLEBAR_H); // content follows via the layout
+}
+
+void EmbeddedWindow::requestClose() {
+    emit closeRequested(this);
 }
 
 void EmbeddedWindow::dragFromTitlebar(QMouseEvent *event) {
@@ -294,15 +290,4 @@ void EmbeddedWindow::paintEvent(QPaintEvent *) {
     p.setPen(QPen(active_ ? QColor(gTheme.accent).darker(140) : QColor(45, 45, 50), 1));
     p.setBrush(active_ ? QColor(35, 37, 42) : QColor(30, 30, 33));
     p.drawRoundedRect(surface, RADIUS, RADIUS);
-
-    // The app's own pixels, drawn by the sandbox with rounded bottom corners.
-    if (content_ && !contents_.isNull()) {
-        const QRect contentRect = content_->geometry();
-        QPainterPath clip;
-        clip.addRoundedRect(surface, RADIUS, RADIUS);
-        p.save();
-        p.setClipPath(clip);
-        p.drawPixmap(contentRect, contents_);
-        p.restore();
-    }
 }

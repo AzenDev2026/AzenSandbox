@@ -188,6 +188,37 @@ void X11::mapWindow(xcb_window_t w) {
         xcb_map_window(c, w);
 }
 
+void X11::roundBottomCorners(xcb_window_t w, int width, int height, int radius) {
+    xcb_connection_t *c = connection();
+    if (!c)
+        return;
+    const xcb_query_extension_reply_t *ext = xcb_get_extension_data(c, &xcb_shape_id);
+    if (!ext || !ext->present)
+        return;
+    if (width < 2 || height < 2)
+        return;
+    radius = qBound(0, radius, qMin(width, height) / 2);
+    QVector<xcb_rectangle_t> rects;
+    rects.reserve(height + radius);
+    for (int y = 0; y < height; ++y) {
+        int inset = 0;
+        if (y >= height - radius && radius > 0) {
+            const int dy = y - (height - radius);
+            const double val = radius * radius - double(dy) * dy;
+            inset = radius - int(std::sqrt(qMax(0.0, val)));
+        }
+        xcb_rectangle_t r;
+        r.x = static_cast<int16_t>(inset);
+        r.y = static_cast<int16_t>(y);
+        r.width = static_cast<uint16_t>(qMax(1, width - 2 * inset));
+        r.height = 1;
+        rects.append(r);
+    }
+    xcb_shape_rectangles(c, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_BOUNDING,
+                         XCB_CLIP_ORDERING_UNSORTED, w, 0, 0,
+                         static_cast<uint32_t>(rects.size()), rects.constData());
+}
+
 
 void X11::unmapWindow(xcb_window_t w) {
     if (xcb_connection_t *c = connection())
