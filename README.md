@@ -4,8 +4,8 @@ A tiny **toy desktop** that lives inside a window on your real desktop —
 like Windows Sandbox, but made for fun. You get a wallpaper, desktop icons,
 a taskbar with a start menu, and a little window manager — and the apps you
 launch inside it are **real programs really running**, with their windows
-pulled into the sandbox. Windows programs work too, through Wine.
-
+pulled into the sandbox. Windows programs work too, through Wine.  
+(note from developer:it is not fully usable,still having many bugs)  
 ## What it can do
 
 - 🎬 **A 5-second boot animation**: 2 seconds of white-dominant code flooding
